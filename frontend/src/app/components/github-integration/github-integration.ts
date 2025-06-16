@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { AgGridModule } from 'ag-grid-angular';
+import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatOptionModule } from '@angular/material/core';
@@ -28,7 +29,7 @@ export class GithubIntegration implements OnInit {
   searchText = '';
   columnDefs: ColDef[] = [];
   rowData: any[] = [];
-  paginationPageSize = 10;
+  paginationPageSize = 20;
   currentPage = 1;
   totalPages = 0;
 
@@ -37,6 +38,7 @@ export class GithubIntegration implements OnInit {
     @Inject(PLATFORM_ID) platformId: Object
   ) {
     this.isBrowser = isPlatformBrowser(platformId);
+    ModuleRegistry.registerModules([AllCommunityModule]);
   }
 
   ngOnInit() {
@@ -44,8 +46,9 @@ export class GithubIntegration implements OnInit {
   }
 
   checkIntegrationStatus() {
-    this.http.get<any>('http://localhost:3000/api/github/status').subscribe({
+    this.http.get<any>('http://backend:3000/api/github/status').subscribe({
       next: (response) => {
+        console.log("response",response);
         this.isConnected = response.isConnected;
         this.connectedAt = response.connectedAt ? new Date(response.connectedAt) : null;
         this.username = response.username;
@@ -57,7 +60,7 @@ export class GithubIntegration implements OnInit {
   }
 
   connectToGithub() {
-    this.http.get<any>('http://localhost:3000/api/github/auth').subscribe({
+    this.http.get<any>('http://backend:3000/api/github/auth').subscribe({
       next: (response) => {
         window.location.href = response.authUrl;
       }
@@ -94,6 +97,7 @@ export class GithubIntegration implements OnInit {
       }
     }).subscribe({
       next: (response) => {
+        console.log("response",response);
         this.rowData = response.data;
         this.totalPages = response.pages;
         

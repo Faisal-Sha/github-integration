@@ -1,4 +1,5 @@
 const axios = require('axios');
+const mongoose = require('mongoose');
 const GithubIntegration = require('../models/GithubIntegration');
 const { getGithubData } = require('../helpers/githubHelper');
 
@@ -89,12 +90,36 @@ exports.getCollectionData = async (req, res) => {
   const { page = 1, limit = 10, search = '' } = req.query;
   
   try {
+    // Check if collection exists
+    const collections = await mongoose.connection.db.listCollections({ name: collection }).toArray();
+    if (collections.length === 0) {
+      return res.json({
+        data: [],
+        total: 0,
+        pages: 0,
+        message: 'No data available yet. Please connect to GitHub first.'
+      });
+    }
+
     const dbCollection = mongoose.connection.db.collection(collection);
-    const query = search ? { $text: { $search: search } } : {};
+    let query = {};
+    
+    if (search) {
+      // Use regex search on common fields instead of text search
+      query = {
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { login: { $regex: search, $options: 'i' } },
+          { full_name: { $regex: search, $options: 'i' } }
+        ]
+      };
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
     
     const [data, total] = await Promise.all([
       dbCollection.find(query)
-        .skip((page - 1) * limit)
+        .skip(skip)
         .limit(parseInt(limit))
         .toArray(),
       dbCollection.countDocuments(query)
@@ -103,9 +128,10 @@ exports.getCollectionData = async (req, res) => {
     res.json({
       data,
       total,
-      pages: Math.ceil(total / limit)
+      pages: Math.ceil(total / parseInt(limit))
     });
   } catch (error) {
+    console.error('Error fetching collection data:', error);
     res.status(500).json({ error: 'Failed to fetch collection data' });
   }
 };
