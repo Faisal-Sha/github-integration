@@ -1,7 +1,6 @@
-import { Component, OnInit, PLATFORM_ID, Inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, PLATFORM_ID, Inject } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { ColDef, PaginationChangedEvent } from 'ag-grid-community';
-import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { AgGridModule } from 'ag-grid-angular';
@@ -12,6 +11,9 @@ import { MatOptionModule } from '@angular/material/core';
 import { MatInputModule } from '@angular/material/input';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatIconModule } from '@angular/material/icon';
+import { GithubService } from '../../services/github.service';
+import { Subject } from 'rxjs';
+import { debounceTime, takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'app-github-integration',
@@ -19,11 +21,14 @@ import { MatIconModule } from '@angular/material/icon';
   templateUrl: './github-integration.html',
   styleUrl: './github-integration.css'
 })
-export class GithubIntegration implements OnInit {
+export class GithubIntegration implements OnInit, OnDestroy {
+  private destroy$ = new Subject<void>();
+  private searchSubject = new Subject<void>();
+
   isBrowser: boolean;
   isConnected = false;
   connectedAt: Date | null = null;
-  username: string | null = null;
+  username: string | null | undefined = null;
   collections = ['organizations', 'repos', 'commits', 'pulls', 'issues', 'users'];
   selectedCollection = 'organizations';
   searchText = '';
@@ -32,9 +37,10 @@ export class GithubIntegration implements OnInit {
   paginationPageSize = 20;
   currentPage = 1;
   totalPages = 0;
+  loading = false;
 
   constructor(
-    private http: HttpClient,
+    private githubService: GithubService,
     @Inject(PLATFORM_ID) platformId: Object
   ) {
     this.isBrowser = isPlatformBrowser(platformId);
@@ -42,25 +48,46 @@ export class GithubIntegration implements OnInit {
   }
 
   ngOnInit() {
+    this.setupSearchDebounce();
     this.checkIntegrationStatus();
   }
 
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  private setupSearchDebounce() {
+    this.searchSubject.pipe(
+      takeUntil(this.destroy$),
+      debounceTime(300)
+    ).subscribe(() => {
+      this.currentPage = 1;
+      this.loadCollectionData();
+    });
+  }
+
   checkIntegrationStatus() {
-    this.http.get<any>('http://backend:3000/api/github/status').subscribe({
+    this.githubService.getIntegrationStatus().subscribe({
       next: (response) => {
         console.log("response",response);
         this.isConnected = response.isConnected;
         this.connectedAt = response.connectedAt ? new Date(response.connectedAt) : null;
         this.username = response.username;
         if (this.isConnected) {
+          // Set default collection and load data
+          this.selectedCollection = 'organizations';
           this.loadCollectionData();
         }
+      },
+      error: (error) => {
+        console.error('Error checking integration status:', error);
       }
     });
   }
 
   connectToGithub() {
-    this.http.get<any>('http://backend:3000/api/github/auth').subscribe({
+    this.githubService.startGithubAuth().subscribe({
       next: (response) => {
         window.location.href = response.authUrl;
       }
@@ -68,7 +95,7 @@ export class GithubIntegration implements OnInit {
   }
 
   removeIntegration() {
-    this.http.delete('http://localhost:3000/api/github/remove').subscribe({
+    this.githubService.removeIntegration().subscribe({
       next: () => {
         this.isConnected = false;
         this.connectedAt = null;
@@ -84,37 +111,40 @@ export class GithubIntegration implements OnInit {
   }
 
   onSearch() {
-    this.currentPage = 1;
-    this.loadCollectionData();
+    this.searchSubject.next();
   }
 
   loadCollectionData() {
-    this.http.get<any>(`http://localhost:3000/api/github/data/${this.selectedCollection}`, {
-      params: {
-        page: this.currentPage.toString(),
-        limit: this.paginationPageSize.toString(),
-        search: this.searchText
-      }
-    }).subscribe({
+    if (this.loading) return;
+    this.loading = true;
+
+    this.githubService.getCollectionData(this.selectedCollection, this.currentPage, this.paginationPageSize, this.searchText).pipe(
+      takeUntil(this.destroy$)).subscribe({
       next: (response) => {
-        console.log("response",response);
+        console.log("response",response);        
         this.rowData = response.data;
         this.totalPages = response.pages;
         
         // Dynamically set column definitions
-        if (response.data.length > 0) {
+        if (response.data.length > 0 && this.columnDefs.length === 0) {
           this.columnDefs = Object.keys(response.data[0]).map(key => ({
             field: key,
             filter: true,
             sortable: true
           }));
         }
+      },
+      error: (error) => {
+        console.error('Error loading data:', error);
+      },
+      complete: () => {
+        this.loading = false;
       }
     });
   }
 
-  onPageChange(event: PaginationChangedEvent<any, any>) {
-    // this.currentPage = event.page;
+  onPageChange(event: PaginationChangedEvent) {
+    this.currentPage = event.api.paginationGetCurrentPage() + 1;
     this.loadCollectionData();
   }
 }

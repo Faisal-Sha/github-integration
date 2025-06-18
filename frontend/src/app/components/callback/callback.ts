@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { HttpClient } from '@angular/common/http';
+import { GithubService } from '../../services/github.service';
 
 @Component({
   selector: 'app-callback',
@@ -12,14 +12,14 @@ export class Callback {
   constructor(
     private route: ActivatedRoute,
     private router: Router,
-    private http: HttpClient
+    private githubService: GithubService
   ) {}
 
   ngOnInit() {
     const code = this.route.snapshot.queryParamMap.get('code');
     if (code) {
       // Send code to backend
-      this.http.get(`http://backend:3000/api/github/callback?code=${code}`).subscribe({
+      this.githubService.handleCallback(code).subscribe({
         next: () => {
           this.router.navigate(['/']);
         },
