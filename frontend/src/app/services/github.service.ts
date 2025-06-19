@@ -40,13 +40,9 @@ export class GithubService {
     return this.http.delete(`${this.apiUrl}/github/remove`);
   }
 
-  getCollectionData(collection: string, page: number, limit: number, search: string): Observable<CollectionResponse> {
+  getCollectionData(collection: string, search: string): Observable<CollectionResponse> {
     return this.http.get<CollectionResponse>(`${this.apiUrl}/github/data/${collection}`, {
-      params: {
-        page: page.toString(),
-        limit: limit.toString(),
-        search
-      }
+      params: { search }
     });
   }
 }

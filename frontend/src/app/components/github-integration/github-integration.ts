@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy, PLATFORM_ID, Inject } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
-import { ColDef, PaginationChangedEvent } from 'ag-grid-community';
+import { CellValueChangedEvent, ColDef, PaginationChangedEvent, RowSelectionOptions, SelectionChangedEvent, ValueFormatterParams } from 'ag-grid-community';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { AgGridModule } from 'ag-grid-angular';
@@ -48,7 +48,7 @@ export class GithubIntegration implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
-    this.setupSearchDebounce();
+    // this.setupSearchDebounce();
     this.checkIntegrationStatus();
   }
 
@@ -70,7 +70,7 @@ export class GithubIntegration implements OnInit, OnDestroy {
   checkIntegrationStatus() {
     this.githubService.getIntegrationStatus().subscribe({
       next: (response) => {
-        console.log("response",response);
+        console.log("status response",response);
         this.isConnected = response.isConnected;
         this.connectedAt = response.connectedAt ? new Date(response.connectedAt) : null;
         this.username = response.username;
@@ -106,6 +106,7 @@ export class GithubIntegration implements OnInit, OnDestroy {
   }
 
   onCollectionChange() {
+    console.log("collection change",this.selectedCollection);
     this.currentPage = 1;
     this.loadCollectionData();
   }
@@ -118,20 +119,29 @@ export class GithubIntegration implements OnInit, OnDestroy {
     if (this.loading) return;
     this.loading = true;
 
-    this.githubService.getCollectionData(this.selectedCollection, this.currentPage, this.paginationPageSize, this.searchText).pipe(
+    this.githubService.getCollectionData(this.selectedCollection, this.searchText).pipe(
       takeUntil(this.destroy$)).subscribe({
       next: (response) => {
-        console.log("response",response);        
+        console.log("collection response",response);        
         this.rowData = response.data;
-        this.totalPages = response.pages;
+        this.totalPages = Math.ceil(response.data.length / this.paginationPageSize);
         
         // Dynamically set column definitions
-        if (response.data.length > 0 && this.columnDefs.length === 0) {
-          this.columnDefs = Object.keys(response.data[0]).map(key => ({
-            field: key,
-            filter: true,
-            sortable: true
-          }));
+        if (response.data.length > 0) {
+          this.columnDefs = [
+            {
+              headerName: '#',
+              valueFormatter: (params: ValueFormatterParams) => ((params.node?.rowIndex || 0) + 1).toString(),
+              width: 70,
+              pinned: 'left'
+            },
+            ...Object.keys(response.data[0]).map(key => ({
+              field: key,
+              filter: true,
+              sortable: true,
+              resizable: true
+            }))
+          ];
         }
       },
       error: (error) => {
@@ -143,8 +153,32 @@ export class GithubIntegration implements OnInit, OnDestroy {
     });
   }
 
+  rowSelection: RowSelectionOptions = {
+    mode: "multiRow",
+    headerCheckbox: false,
+  };
+
+  // Default Column Definitions: Apply configuration across all columns
+  defaultColDef: ColDef = {
+    filter: true, // Enable filtering on all columns
+    editable: true, // Enable editing on all columns
+  };
+
+  // Handle row selection changed event
+  onSelectionChanged = (event: SelectionChangedEvent) => {
+    console.log("Row Selected!");
+  };
+
+  // Handle cell editing event
+  onCellValueChanged = (event: CellValueChangedEvent) => {
+    console.log(`New Cell Value: ${event.value}`);
+  };
+
   onPageChange(event: PaginationChangedEvent) {
-    this.currentPage = event.api.paginationGetCurrentPage() + 1;
-    this.loadCollectionData();
+    const newPage = event.api.paginationGetCurrentPage() + 1;
+    if (newPage !== this.currentPage) {
+      this.currentPage = newPage;
+      this.loadCollectionData();
+    }
   }
 }

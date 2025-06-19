@@ -87,7 +87,7 @@ exports.removeIntegration = async (req, res) => {
 
 exports.getCollectionData = async (req, res) => {
   const { collection } = req.params;
-  const { page = 1, limit = 10, search = '' } = req.query;
+  const { search = '' } = req.query;
   
   try {
     // Check if collection exists
@@ -95,8 +95,6 @@ exports.getCollectionData = async (req, res) => {
     if (collections.length === 0) {
       return res.json({
         data: [],
-        total: 0,
-        pages: 0,
         message: 'No data available yet. Please connect to GitHub first.'
       });
     }
@@ -115,20 +113,11 @@ exports.getCollectionData = async (req, res) => {
       };
     }
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-    const [data, total] = await Promise.all([
-      dbCollection.find(query)
-        .skip(skip)
-        .limit(parseInt(limit))
-        .toArray(),
-      dbCollection.countDocuments(query)
-    ]);
+    // Get all data
+    const data = await dbCollection.find(query).toArray();
 
     res.json({
-      data,
-      total,
-      pages: Math.ceil(total / parseInt(limit))
+      data
     });
   } catch (error) {
     console.error('Error fetching collection data:', error);
