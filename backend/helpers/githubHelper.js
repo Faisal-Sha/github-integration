@@ -1,5 +1,6 @@
 const axios = require('axios');
 const mongoose = require('mongoose');
+const FetchProgress = require('../models/FetchProgress');
 
 // Helper function to get next page URL from Link header
 const getNextPageUrl = (headers) => {
@@ -14,17 +15,34 @@ const getNextPageUrl = (headers) => {
   return match ? match[1] : null;
 };
 
-// Helper function to fetch all pages
-async function fetchAllPages(initialUrl, accessToken) {
+// Helper function to check rate limits
+const checkRateLimit = async (accessToken) => {
+  const response = await axios.get('https://api.github.com/rate_limit', {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const remaining = response.data.resources.core.remaining;
+  if (remaining < 100) {
+    const resetTime = new Date(response.data.resources.core.reset * 1000);
+    throw new Error(`Rate limit low (${remaining} remaining). Resets at ${resetTime}`);
+  }
+  return remaining;
+};
+
+// Helper function to fetch limited pages
+async function fetchLimitedPages(initialUrl, accessToken, maxItems = 1000) {
   let url = initialUrl;
   let allData = [];
+  let itemsFetched = 0;
 
-  while (url) {
+  while (url && itemsFetched < maxItems) {
+    await checkRateLimit(accessToken);
     const response = await axios.get(url, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     
-    allData = allData.concat(response.data);
+    const items = response.data.slice(0, maxItems - itemsFetched);
+    allData = allData.concat(items);
+    itemsFetched += items.length;
     url = getNextPageUrl(response.headers);
   }
 
@@ -33,89 +51,107 @@ async function fetchAllPages(initialUrl, accessToken) {
 
 exports.getGithubData = async (accessToken) => {
   try {
+    let progress = 0;
+    const updateProgress = async (increment, message) => {
+      progress = Math.min(progress + increment, 100);
+      await FetchProgress.updateOne({}, {
+        status: 'processing',
+        progress,
+        message,
+        updatedAt: new Date()
+      }, { upsert: true });
+    };
+
+    await updateProgress(0, 'Fetching organizations...');
+
     // Fetch organizations
+    await checkRateLimit(accessToken);
     const orgs = await axios.get('https://api.github.com/user/orgs', {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     
     await mongoose.connection.db.collection('organizations').insertMany(orgs.data);
+    await updateProgress(10, 'Organizations fetched');
 
-    for (const org of orgs.data) {
-      // Fetch repositories
-      const repos = await axios.get(`https://api.github.com/orgs/${org.login}/repos`, {
+    for (let i = 0; i < orgs.data.length; i++) {
+      const org = orgs.data[i];
+      await updateProgress(10, `Fetching repositories for ${org.login}...`);
+
+      // Fetch repositories (limit to first 3 for testing)
+      await checkRateLimit(accessToken);
+      const repos = await axios.get(`https://api.github.com/orgs/${org.login}/repos?per_page=100`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       
-      await mongoose.connection.db.collection('repos').insertMany(repos.data);
+      const limitedRepos = repos.data.slice(0, 3); // Limit to 3 repos
+      await mongoose.connection.db.collection('repos').insertMany(limitedRepos);
+      await updateProgress(10, `Repositories fetched for ${org.login}`);
 
-      for (const repo of repos.data) {
+      for (const repo of limitedRepos) {
         try {
-          // Get repository details to check if it's forked
+          // Get repository details
+          await checkRateLimit(accessToken);
           const repoDetails = await axios.get(`https://api.github.com/repos/${org.login}/${repo.name}`, {
             headers: { Authorization: `Bearer ${accessToken}` }
           });
 
-          // Determine which repository to fetch data from (parent if forked, current if not)
           const targetRepo = repoDetails.data.fork ? repoDetails.data.parent : repo;
           const targetOwner = repoDetails.data.fork ? targetRepo.owner.login : org.login;
-          console.log(`Fetching data for repo: ${targetOwner}/${targetRepo.name} (${repoDetails.data.fork ? 'forked' : 'original'})`);
 
+          await updateProgress(5, `Fetching data for ${targetOwner}/${targetRepo.name}...`);
+
+          // Fetch commits (limit to 1000)
           try {
-            // Fetch all commits with pagination
             const commitsUrl = `https://api.github.com/repos/${targetOwner}/${targetRepo.name}/commits?per_page=100`;
-            const allCommits = await fetchAllPages(commitsUrl, accessToken);
+            const allCommits = await fetchLimitedPages(commitsUrl, accessToken, 1000);
             if (allCommits.length > 0) {
               await mongoose.connection.db.collection('commits').insertMany(allCommits);
-              console.log(`Saved ${allCommits.length} commits for ${targetRepo.name}`);
             }
           } catch (error) {
             console.error(`Error fetching commits for ${targetRepo.name}:`, error.message);
           }
 
+          // Fetch pull requests (limit to 1000)
           try {
-            // Fetch all pull requests with pagination
             const pullsUrl = `https://api.github.com/repos/${targetOwner}/${targetRepo.name}/pulls?per_page=100&state=all`;
-            const allPulls = await fetchAllPages(pullsUrl, accessToken);
+            const allPulls = await fetchLimitedPages(pullsUrl, accessToken, 1000);
             if (allPulls.length > 0) {
               await mongoose.connection.db.collection('pulls').insertMany(allPulls);
-              console.log(`Saved ${allPulls.length} pull requests for ${targetRepo.name}`);
             }
           } catch (error) {
             console.error(`Error fetching pull requests for ${targetRepo.name}:`, error.message);
           }
 
+          // Fetch issues (limit to 500)
           try {
-            // Fetch all issues with pagination
             const issuesUrl = `https://api.github.com/repos/${targetOwner}/${targetRepo.name}/issues?per_page=100&state=all`;
-            const allIssues = await fetchAllPages(issuesUrl, accessToken);
+            const allIssues = await fetchLimitedPages(issuesUrl, accessToken, 500);
             if (allIssues.length > 0) {
               await mongoose.connection.db.collection('issues').insertMany(allIssues);
-              console.log(`Saved ${allIssues.length} issues for ${targetRepo.name}`);
             }
           } catch (error) {
             console.error(`Error fetching issues for ${targetRepo.name}:`, error.message);
           }
         } catch (error) {
           console.error(`Error processing repository ${repo.name}:`, error.message);
-          continue; // Continue with next repository
+          continue;
         }
       }
     }
 
-    // Fetch organization members for each org
+    // Fetch organization members
     for (const org of orgs.data) {
       try {
-        const members = await axios.get(`https://api.github.com/orgs/${org.login}/members`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          params: { per_page: 100 }
+        await checkRateLimit(accessToken);
+        const members = await axios.get(`https://api.github.com/orgs/${org.login}/members?per_page=100`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
         });
-        if (members.data && members.data.length > 0) {
+        if (members.data.length > 0) {
           await mongoose.connection.db.collection('users').insertMany(members.data);
         }
+        await updateProgress(5, `Fetched members for ${org.login}`);
       } catch (error) {
         console.error(`Error fetching members for org ${org.login}:`, error.message);
-        // Continue with other orgs even if one fails
-        continue;
       }
     }
   } catch (error) {

@@ -16,11 +16,17 @@ export interface CollectionResponse {
   message?: string;
 }
 
+export interface FetchStatus {
+  status: string;
+  progress: number;
+  message: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class GithubService {
-  private apiUrl = environment.apiUrl;
+  private apiUrl = environment.apiUrl || 'http://localhost:3000/api';
 
   constructor(private http: HttpClient) {}
 
@@ -44,5 +50,9 @@ export class GithubService {
     return this.http.get<CollectionResponse>(`${this.apiUrl}/github/data/${collection}`, {
       params: { search }
     });
+  }
+
+  getFetchStatus(): Observable<FetchStatus> {
+    return this.http.get<FetchStatus>(`${this.apiUrl}/github/fetch-status`);
   }
 }

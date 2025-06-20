@@ -9,6 +9,7 @@ services:
       - ./backend/.env
     depends_on:
       - mongodb
+      - redis
     volumes:
       - ./backend:/usr/src/app
       - /usr/src/app/node_modules
@@ -56,8 +57,19 @@ services:
       - app-network
     restart: unless-stopped
 
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+
 volumes:
   mongo-data:
+  redis-data:
 
 networks:
   app-network:

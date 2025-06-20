@@ -1,14 +1,16 @@
 const axios = require('axios');
 const mongoose = require('mongoose');
+const Queue = require('bull');
 const GithubIntegration = require('../models/GithubIntegration');
+const FetchProgress = require('../models/FetchProgress');
 const { getGithubData } = require('../helpers/githubHelper');
 
+// Initialize Bull queue (requires Redis)
+const githubDataQueue = new Queue('github-data', {
+  redis: { host: 'redis', port: 6379 }
+});
+
 exports.startGithubAuth = (req, res) => {
-  console.log('Environment variables:', {
-    GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
-    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
-    NODE_ENV: process.env.NODE_ENV
-  });
   const clientId = process.env.GITHUB_CLIENT_ID;
   const redirectUri = 'http://localhost:4200/callback';
   const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=read:org,repo`;
@@ -44,8 +46,15 @@ exports.handleGithubCallback = async (req, res) => {
     });
     await integration.save();
 
-    // Fetch and store GitHub data
-    await getGithubData(access_token);
+    // Initialize fetch progress
+    await FetchProgress.create({
+      status: 'pending',
+      progress: 0,
+      message: 'Starting GitHub data fetch...'
+    });
+
+    // Queue data fetching
+    await githubDataQueue.add({ accessToken: access_token });
 
     res.redirect('http://localhost:4200?success=true');
   } catch (error) {
@@ -57,7 +66,6 @@ exports.handleGithubCallback = async (req, res) => {
 exports.getIntegrationStatus = async (req, res) => {
   try {
     const integration = await GithubIntegration.findOne();
-    console.log("integration",integration);
     res.json({
       isConnected: !!integration,
       connectedAt: integration?.connectedAt,
@@ -68,9 +76,23 @@ exports.getIntegrationStatus = async (req, res) => {
   }
 };
 
+exports.getFetchStatus = async (req, res) => {
+  try {
+    const progress = await FetchProgress.findOne().sort({ updatedAt: -1 });
+    res.json({
+      status: progress?.status || 'pending',
+      progress: progress?.progress || 0,
+      message: progress?.message || 'No fetch in progress'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check fetch status' });
+  }
+};
+
 exports.removeIntegration = async (req, res) => {
   try {
     await GithubIntegration.deleteMany({});
+    await FetchProgress.deleteMany({});
     // Clear other collections
     await Promise.all([
       mongoose.connection.db.collection('organizations').deleteMany({}),
@@ -90,7 +112,6 @@ exports.getCollectionData = async (req, res) => {
   const { search = '' } = req.query;
   
   try {
-    // Check if collection exists
     const collections = await mongoose.connection.db.listCollections({ name: collection }).toArray();
     if (collections.length === 0) {
       return res.json({
@@ -103,7 +124,6 @@ exports.getCollectionData = async (req, res) => {
     let query = {};
     
     if (search) {
-      // Use regex search on common fields instead of text search
       query = {
         $or: [
           { name: { $regex: search, $options: 'i' } },
@@ -113,7 +133,6 @@ exports.getCollectionData = async (req, res) => {
       };
     }
     
-    // Get all data
     const data = await dbCollection.find(query).toArray();
 
     res.json({
@@ -124,3 +143,24 @@ exports.getCollectionData = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch collection data' });
   }
 };
+
+// Process queued data fetching
+githubDataQueue.process(async (job) => {
+  try {
+    await getGithubData(job.data.accessToken);
+    await FetchProgress.updateOne({}, {
+      status: 'completed',
+      progress: 100,
+      message: 'Data fetch completed',
+      updatedAt: new Date()
+    }, { upsert: true });
+  } catch (error) {
+    await FetchProgress.updateOne({}, {
+      status: 'failed',
+      progress: 0,
+      message: `Data fetch failed: ${error.message}`,
+      updatedAt: new Date()
+    }, { upsert: true });
+    throw error;
+  }
+});

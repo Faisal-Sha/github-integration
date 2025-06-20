@@ -12,12 +12,13 @@ import { MatInputModule } from '@angular/material/input';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatIconModule } from '@angular/material/icon';
 import { GithubService } from '../../services/github.service';
-import { Subject } from 'rxjs';
-import { debounceTime, takeUntil } from 'rxjs/operators';
+import { interval, Subject } from 'rxjs';
+import { debounceTime, switchMap, takeUntil } from 'rxjs/operators';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 
 @Component({
   selector: 'app-github-integration',
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, AgGridModule, MatFormFieldModule, MatSelectModule, MatOptionModule, MatInputModule, MatExpansionModule, MatIconModule],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, AgGridModule, MatFormFieldModule, MatSelectModule, MatOptionModule, MatInputModule, MatExpansionModule, MatIconModule, MatProgressBarModule],
   templateUrl: './github-integration.html',
   styleUrl: './github-integration.css'
 })
@@ -38,6 +39,9 @@ export class GithubIntegration implements OnInit, OnDestroy {
   currentPage = 1;
   totalPages = 0;
   loading = false;
+  fetchProgress = 0;
+  fetchStatus = 'pending';
+  fetchMessage = '';
 
   constructor(
     private githubService: GithubService,
@@ -50,6 +54,7 @@ export class GithubIntegration implements OnInit, OnDestroy {
   ngOnInit() {
     // this.setupSearchDebounce();
     this.checkIntegrationStatus();
+    this.pollFetchStatus();
   }
 
   ngOnDestroy() {
@@ -67,6 +72,26 @@ export class GithubIntegration implements OnInit, OnDestroy {
     });
   }
 
+  private pollFetchStatus() {
+    console.log("Polling fetch status...");
+    interval(2000).pipe(
+      takeUntil(this.destroy$),
+      switchMap(() => this.githubService.getFetchStatus())
+    ).subscribe({
+      next: (response) => {
+        this.fetchStatus = response.status;
+        this.fetchProgress = response.progress;
+        this.fetchMessage = response.message;
+        if (response.status === 'completed' && this.isConnected) {
+          this.loadCollectionData();
+        }
+      },
+      error: (error) => {
+        console.error('Error polling fetch status:', error);
+      }
+    });
+  }
+
   checkIntegrationStatus() {
     this.githubService.getIntegrationStatus().subscribe({
       next: (response) => {
@@ -74,7 +99,7 @@ export class GithubIntegration implements OnInit, OnDestroy {
         this.isConnected = response.isConnected;
         this.connectedAt = response.connectedAt ? new Date(response.connectedAt) : null;
         this.username = response.username;
-        if (this.isConnected) {
+        if (this.isConnected && this.fetchStatus === 'completed') {
           // Set default collection and load data
           this.selectedCollection = 'organizations';
           this.loadCollectionData();
@@ -101,6 +126,9 @@ export class GithubIntegration implements OnInit, OnDestroy {
         this.connectedAt = null;
         this.username = null;
         this.rowData = [];
+        this.fetchStatus = 'pending';
+        this.fetchProgress = 0;
+        this.fetchMessage = '';
       }
     });
   }
@@ -175,6 +203,7 @@ export class GithubIntegration implements OnInit, OnDestroy {
   };
 
   onPageChange(event: PaginationChangedEvent) {
+    console.log("Page Changed!");
     const newPage = event.api.paginationGetCurrentPage() + 1;
     if (newPage !== this.currentPage) {
       this.currentPage = newPage;
