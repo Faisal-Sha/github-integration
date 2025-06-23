@@ -153,6 +153,9 @@ export class GithubIntegration {
   }
 
   removeIntegration() { 
+    // Destroy all subscriptions
+    this.destroy$.next();
+    
     this.githubService.removeIntegration().subscribe({
       next: () => {
         this.isConnected.set(false);
