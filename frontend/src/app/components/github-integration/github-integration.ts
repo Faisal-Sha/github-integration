@@ -22,7 +22,7 @@ import { FormsModule } from '@angular/forms';
 export class GithubIntegration {
   private searchSubject = new Subject<void>();
   private destroy$ = new Subject<void>();
-  private pollInterval$ = interval(2000);
+  private pollInterval$ = interval(3000)  // Poll every second for more responsive updates;
 
   rowData: any[] = [];
   colDefs: ColDef[] = [];
@@ -62,8 +62,7 @@ export class GithubIntegration {
 
   ngOnInit() {
     this.setupSearchDebounce();
-    this.gitHubIntegrationStatus();
-    this.pollFetchStatus();
+    // this.gitHubIntegrationStatus();
   }
 
   private setGridData(data: any[]) {
@@ -118,6 +117,7 @@ export class GithubIntegration {
         this.connectedAt.set(response.connectedAt || null);
         this.username.set(response.username || null);
         if (this.isConnected()) {
+          this.pollFetchStatus();
           this.loadCollectionData(this.selectedCollection());
         }
       },
@@ -200,6 +200,7 @@ export class GithubIntegration {
       takeUntil(this.destroy$),
       switchMap(() => this.githubService.getFetchStatus())
     ).subscribe(status => {
+      console.log("Fetch status", status, status.stats);
       this.fetchStatus.set(status.status as any);
       this.fetchProgress.set(status.progress);
       this.fetchMessage.set(status.message);

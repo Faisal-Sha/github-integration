@@ -82,7 +82,8 @@ exports.getFetchStatus = async (req, res) => {
     res.json({
       status: progress?.status || 'pending',
       progress: progress?.progress || 0,
-      message: progress?.message || 'No fetch in progress'
+      message: progress?.message || 'No fetch in progress',
+      stats: progress?.stats || null,
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to check fetch status' });

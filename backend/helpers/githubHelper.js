@@ -50,8 +50,16 @@ async function fetchPaginatedData(url, accessToken, collection, owner, repoName,
       // Update progress
       const progress = await FetchProgress.findOne();
       if (progress) {
+        // Update page count
         progress.currentRepo[`${pageType}Page`]++;
-        progress.stats[`total${pageType.charAt(0).toUpperCase() + pageType.slice(1)}`] += response.data.length;
+        
+        // Update total count based on type
+        const statKey = `total${pageType.charAt(0).toUpperCase() + pageType.slice(1)}`;
+        progress.stats[statKey] = (progress.stats[statKey] || 0) + response.data.length;
+        
+        // Update timestamp
+        progress.updatedAt = new Date();
+        
         await progress.save();
       }
     }
@@ -168,9 +176,20 @@ exports.getGithubData = async (accessToken) => {
 
           // Update processed repos count and progress
           const progress = await FetchProgress.findOne();
-          progress.stats.processedRepos++;
-          progress.progress = Math.min(100, Math.round((progress.stats.processedRepos / progress.stats.totalRepos) * 100));
-          await progress.save();
+          if (progress) {
+            // Increment processed repos
+            progress.stats.processedRepos++;
+            
+            // Update progress percentage
+            if (progress.stats.totalRepos > 0) {
+              progress.progress = (progress.stats.processedRepos / progress.stats.totalRepos) * 100;
+            }
+            
+            // Update timestamp
+            progress.updatedAt = new Date();
+            
+            await progress.save();
+          }
 
         } catch (error) {
           console.error(`Error processing repository ${repo.name}:`, error.message);
