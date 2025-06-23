@@ -90,6 +90,21 @@ exports.getFetchStatus = async (req, res) => {
   }
 };
 
+exports.stopFetch = async (req, res) => {
+  try {
+    // Set status to idle to stop any ongoing fetch
+    await mongoose.connection.db.collection('fetchStatus').updateOne(
+      {},
+      { $set: { status: 'idle', progress: 0, message: '', currentRepo: null } },
+      { upsert: true }
+    );
+    res.json({ message: 'Fetch stopped successfully' });
+  } catch (error) {
+    console.error('Error stopping fetch:', error);
+    res.status(500).json({ error: 'Failed to stop fetch' });
+  }
+};
+
 exports.removeIntegration = async (req, res) => {
   try {
     await GithubIntegration.deleteMany({});

@@ -111,6 +111,18 @@
     </mat-select>
   </mat-form-field>
 
+  <!-- @if (selectedCollection() === 'commits' || selectedCollection() === 'pulls' || selectedCollection() === 'issues') {
+    <mat-form-field appearance="fill">
+      <mat-label>Repository</mat-label>
+      <mat-select [(value)]="selectedRepo" (selectionChange)="onRepoChange()">
+        <mat-option [value]="null">All Repositories</mat-option>
+        <mat-option *ngFor="let repo of repositories()" [value]="repo">
+          {{ repo.owner.login }}/{{ repo.name }}
+        </mat-option>
+      </mat-select>
+    </mat-form-field>
+  } -->
+
   <mat-form-field appearance="fill">
     <mat-label>Search</mat-label>
     <input matInput [(ngModel)]="searchText" (input)="showSearchedText.set(true); onSearch()">
