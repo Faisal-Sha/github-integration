@@ -30,7 +30,8 @@ export class Callback {
       this.githubService.handleCallback(code).subscribe({
         next: () => {
           // Start polling fetch status
-          this.pollFetchStatus();
+          // this.pollFetchStatus();
+          this.router.navigate(['/']);
         },
         error: (error:any) => {
           console.error('Error in GitHub callback:', error);

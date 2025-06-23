@@ -17,10 +17,29 @@ export interface CollectionResponse {
   message?: string;
 }
 
+export interface FetchStats {
+  totalRepos: number;
+  processedRepos: number;
+  totalCommits: number;
+  totalPulls: number;
+  totalIssues: number;
+}
+
+export interface CurrentRepo {
+  owner: string;
+  name: string;
+  commitsPage: number;
+  pullsPage: number;
+  issuesPage: number;
+}
+
 export interface FetchStatus {
   status: string;
   progress: number;
   message: string;
+  currentRepo?: CurrentRepo;
+  stats?: FetchStats;
+  updatedAt: string;
 }
 
 

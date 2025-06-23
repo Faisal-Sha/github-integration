@@ -147,6 +147,7 @@ exports.getCollectionData = async (req, res) => {
 // Process queued data fetching
 githubDataQueue.process(async (job) => {
   try {
+    console.log('Processing GitHub data fetching...');
     await getGithubData(job.data.accessToken);
     await FetchProgress.updateOne({}, {
       status: 'completed',
@@ -155,6 +156,7 @@ githubDataQueue.process(async (job) => {
       updatedAt: new Date()
     }, { upsert: true });
   } catch (error) {
+    console.error('Error fetching GitHub data:', error);
     await FetchProgress.updateOne({}, {
       status: 'failed',
       progress: 0,

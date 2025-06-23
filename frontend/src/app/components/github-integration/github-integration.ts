@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, ValueFormatterParams, GridReadyEvent, ModuleRegistry, AllCommunityModule, GridApi, RowSelectionOptions, SelectionChangedEvent, CellValueChangedEvent, PaginationChangedEvent } from 'ag-grid-community';
-import { GithubService } from '../../services/github';
+import { GithubService, FetchStats, CurrentRepo } from '../../services/github';
 import { takeUntil, Subject, debounceTime, interval, switchMap } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { MatExpansionModule } from '@angular/material/expansion';
@@ -10,17 +10,19 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatCardModule } from '@angular/material/card';
 import { FormsModule } from '@angular/forms';
 
 @Component({
   selector: 'app-github-integration',
-  imports: [AgGridAngular, CommonModule, FormsModule, MatExpansionModule, MatIconModule, MatFormFieldModule, MatSelectModule, MatInputModule, MatProgressBarModule],
+  imports: [AgGridAngular, CommonModule, FormsModule, MatExpansionModule, MatIconModule, MatFormFieldModule, MatSelectModule, MatInputModule, MatProgressBarModule, MatCardModule],
   templateUrl: './github-integration.html',
   styleUrl: './github-integration.css'
 })
 export class GithubIntegration {
   private searchSubject = new Subject<void>();
   private destroy$ = new Subject<void>();
+  private pollInterval$ = interval(2000);
 
   rowData: any[] = [];
   colDefs: ColDef[] = [];
@@ -30,8 +32,12 @@ export class GithubIntegration {
   fetchStatus = signal<'idle' | 'processing' | 'failed'>('idle');
   fetchProgress = signal(0);
   fetchMessage = signal('');
+  currentRepo = signal<CurrentRepo | null>(null);
+  stats = signal<FetchStats>({ totalRepos: 0, processedRepos: 0, totalCommits: 0, totalPulls: 0, totalIssues: 0 });
+  lastUpdated = signal<Date | null>(null);
+  
   gridApi: GridApi<any> | null = null;
-  collections = ['organizations', 'repos', 'commits', 'pulls', 'issues', 'users'];
+  collections = ['organizations', 'repos', 'commits', 'pulls', 'issues'];
   selectedCollection = signal('organizations');
   searchText = '';
   showSearchedText = signal(false);
@@ -56,12 +62,17 @@ export class GithubIntegration {
 
   ngOnInit() {
     this.setupSearchDebounce();
-    // this.gitHubIntegrationStatus();
-    // this.pollFetchStatus();
+    this.gitHubIntegrationStatus();
+    this.pollFetchStatus();
   }
 
   private setGridData(data: any[]) {
-    if (!data?.length) return;
+    console.log("Setting grid data", data);
+    if (!data?.length) {
+      this.rowData = [];
+      this.colDefs = [];
+      return;
+    }
     
     // First set the column definitions
     this.colDefs = [
@@ -185,20 +196,33 @@ export class GithubIntegration {
 
   private pollFetchStatus() {
     console.log("Polling fetch status...");
-    interval(2000).pipe(
+    this.pollInterval$.pipe(
       takeUntil(this.destroy$),
       switchMap(() => this.githubService.getFetchStatus())
-    ).subscribe({
-      next: (response: any) => {
-        this.fetchStatus.set(response.status);
-        this.fetchProgress.set(response.progress);
-        this.fetchMessage.set(response.message);
-        if (response.status === 'completed' && this.isConnected()) {
-          this.loadCollectionData(this.selectedCollection());
+    ).subscribe(status => {
+      this.fetchStatus.set(status.status as any);
+      this.fetchProgress.set(status.progress);
+      this.fetchMessage.set(status.message);
+      this.currentRepo.set(status.currentRepo || null);
+      if (status.stats) {
+        this.stats.set(status.stats);
+      }
+      // Only update if we have a valid date string
+      if (status.updatedAt) {
+        const date = new Date(status.updatedAt);
+        if (!isNaN(date.getTime())) {
+          this.lastUpdated.set(date);
         }
-      },
-      error: (error) => {
-        console.error('Error polling fetch status:', error);
+      }
+
+      // Auto-refresh data when collection matches current repo type
+      if (status.currentRepo && this.selectedCollection()) {
+        const collection = this.selectedCollection();
+        if ((collection === 'commits' && status.currentRepo.commitsPage > 0) ||
+            (collection === 'pulls' && status.currentRepo.pullsPage > 0) ||
+            (collection === 'issues' && status.currentRepo.issuesPage > 0)) {
+          this.loadCollectionData(collection);
+        }
       }
     });
   }

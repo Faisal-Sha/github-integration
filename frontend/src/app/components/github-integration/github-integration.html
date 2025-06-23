@@ -37,8 +37,60 @@
 <div style="margin-top: 20px;">
 
   @if (fetchStatus() === 'processing') {
-    <mat-progress-bar mode="determinate" [value]="fetchProgress()"></mat-progress-bar>
-    <p>{{ fetchMessage() }}</p>
+    <div class="progress-section">
+      <mat-progress-bar mode="determinate" [value]="fetchProgress()"></mat-progress-bar>
+      <p class="message">{{ fetchMessage() }}</p>
+      
+      @if (currentRepo()) {
+      <mat-card class="repo-status">
+        <mat-card-header>
+          <mat-card-title>Current Repository</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p><strong>Owner:</strong> {{ currentRepo()?.owner }}</p>
+          <p><strong>Repository:</strong> {{ currentRepo()?.name }}</p>
+          <p><strong>Progress:</strong></p>
+          <ul>
+            <li>Commits Page: {{ currentRepo()?.commitsPage }}</li>
+            <li>Pull Requests Page: {{ currentRepo()?.pullsPage }}</li>
+            <li>Issues Page: {{ currentRepo()?.issuesPage }}</li>
+          </ul>
+        </mat-card-content>
+      </mat-card>
+      }
+
+      @if (stats()) {
+      <mat-card class="fetch-stats">
+        <mat-card-header>
+          <mat-card-title>Fetch Statistics</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-value">{{ stats().processedRepos }}/{{ stats().totalRepos }}</div>
+              <div class="stat-label">Repositories</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ stats().totalCommits }}</div>
+              <div class="stat-label">Commits</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ stats().totalPulls }}</div>
+              <div class="stat-label">Pull Requests</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ stats().totalIssues }}</div>
+              <div class="stat-label">Issues</div>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+      }
+
+      @if (lastUpdated()) {
+        <p class="last-updated">Last updated: {{ lastUpdated() | date:'medium' }}</p>
+      }
+    </div>
   } @else if (fetchStatus() === 'failed') {
     <p style="color: red;">{{ fetchMessage() }}</p>
   }
