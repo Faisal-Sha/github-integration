@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { environment } from '../../environments/environment';
+import { environment } from '../../environments/environment.development';
+import { HttpClient } from '@angular/common/http';
+
 
 export interface IntegrationStatus {
   isConnected: boolean;
@@ -22,6 +23,7 @@ export interface FetchStatus {
   message: string;
 }
 
+
 @Injectable({
   providedIn: 'root'
 })
@@ -34,6 +36,12 @@ export class GithubService {
     return this.http.get<IntegrationStatus>(`${this.apiUrl}/github/status`);
   }
 
+  getCollectionData(collection: string, search: string): Observable<CollectionResponse> {
+    return this.http.get<CollectionResponse>(`${this.apiUrl}/github/data/${collection}`, {
+      params: { search }
+    });
+  }
+
   startGithubAuth(): Observable<{ authUrl: string }> {
     return this.http.get<{ authUrl: string }>(`${this.apiUrl}/github/auth`);
   }
@@ -44,12 +52,6 @@ export class GithubService {
 
   removeIntegration(): Observable<any> {
     return this.http.delete(`${this.apiUrl}/github/remove`);
-  }
-
-  getCollectionData(collection: string, search: string): Observable<CollectionResponse> {
-    return this.http.get<CollectionResponse>(`${this.apiUrl}/github/data/${collection}`, {
-      params: { search }
-    });
   }
 
   getFetchStatus(): Observable<FetchStatus> {

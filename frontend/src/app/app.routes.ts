@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
-import { Callback } from './components/callback/callback';
 import { GithubIntegration } from './components/github-integration/github-integration';
+import { Callback } from './components/callback/callback';
 
 export const routes: Routes = [
     { path: '', component: GithubIntegration },

@@ -1,60 +1,171 @@
-import { Component, OnInit, OnDestroy, PLATFORM_ID, Inject } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
-import { CellValueChangedEvent, ColDef, PaginationChangedEvent, RowSelectionOptions, SelectionChangedEvent, ValueFormatterParams } from 'ag-grid-community';
+import { Component, signal } from '@angular/core';
+import { AgGridAngular } from 'ag-grid-angular';
+import { ColDef, ValueFormatterParams, GridReadyEvent, ModuleRegistry, AllCommunityModule, GridApi, RowSelectionOptions, SelectionChangedEvent, CellValueChangedEvent, PaginationChangedEvent } from 'ag-grid-community';
+import { GithubService } from '../../services/github';
+import { takeUntil, Subject, debounceTime, interval, switchMap } from 'rxjs';
 import { CommonModule } from '@angular/common';
-import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { AgGridModule } from 'ag-grid-angular';
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatSelectModule } from '@angular/material/select';
-import { MatOptionModule } from '@angular/material/core';
-import { MatInputModule } from '@angular/material/input';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatIconModule } from '@angular/material/icon';
-import { GithubService } from '../../services/github.service';
-import { interval, Subject } from 'rxjs';
-import { debounceTime, switchMap, takeUntil } from 'rxjs/operators';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatSelectModule } from '@angular/material/select';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { FormsModule } from '@angular/forms';
 
 @Component({
   selector: 'app-github-integration',
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, AgGridModule, MatFormFieldModule, MatSelectModule, MatOptionModule, MatInputModule, MatExpansionModule, MatIconModule, MatProgressBarModule],
+  imports: [AgGridAngular, CommonModule, FormsModule, MatExpansionModule, MatIconModule, MatFormFieldModule, MatSelectModule, MatInputModule, MatProgressBarModule],
   templateUrl: './github-integration.html',
   styleUrl: './github-integration.css'
 })
-export class GithubIntegration implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
+export class GithubIntegration {
   private searchSubject = new Subject<void>();
+  private destroy$ = new Subject<void>();
 
-  isBrowser: boolean;
-  isConnected = false;
-  connectedAt: Date | null = null;
-  username: string | null | undefined = null;
-  collections = ['organizations', 'repos', 'commits', 'pulls', 'issues', 'users'];
-  selectedCollection = 'organizations';
-  searchText = '';
-  columnDefs: ColDef[] = [];
   rowData: any[] = [];
-  paginationPageSize = 20;
+  colDefs: ColDef[] = [];
+  isConnected = signal(false);
+  connectedAt = signal<Date | null>(null);
+  username = signal<string | null>(null);
+  fetchStatus = signal<'idle' | 'processing' | 'failed'>('idle');
+  fetchProgress = signal(0);
+  fetchMessage = signal('');
+  gridApi: GridApi<any> | null = null;
+  collections = ['organizations', 'repos', 'commits', 'pulls', 'issues', 'users'];
+  selectedCollection = signal('organizations');
+  searchText = '';
+  showSearchedText = signal(false);
+  paginationPageSize = signal(20);
   currentPage = 1;
   totalPages = 0;
-  loading = false;
-  fetchProgress = 0;
-  fetchStatus = 'pending';
-  fetchMessage = '';
 
-  constructor(
-    private githubService: GithubService,
-    @Inject(PLATFORM_ID) platformId: Object
-  ) {
-    this.isBrowser = isPlatformBrowser(platformId);
+  rowSelection: RowSelectionOptions = {
+    mode: "multiRow",
+    headerCheckbox: false,
+  };
+  defaultColDef: ColDef = {
+    filter: true,
+    editable: true,
+    resizable: true,
+    sortable: true,
+  };
+
+  constructor(private githubService: GithubService) {
     ModuleRegistry.registerModules([AllCommunityModule]);
   }
 
   ngOnInit() {
-    // this.setupSearchDebounce();
-    this.checkIntegrationStatus();
-    this.pollFetchStatus();
+    this.setupSearchDebounce();
+    // this.gitHubIntegrationStatus();
+    // this.pollFetchStatus();
+  }
+
+  private setGridData(data: any[]) {
+    if (!data?.length) return;
+    
+    // First set the column definitions
+    this.colDefs = [
+      {
+        headerName: '#',
+        valueFormatter: (params: ValueFormatterParams) => ((params.node?.rowIndex || 0) + 1).toString(),
+        width: 70,
+        pinned: 'left'
+      },
+      ...Object.keys(data[0]).map(key => ({
+        field: key,
+        headerName: key.charAt(0).toUpperCase() + key.slice(1)
+      }))
+    ];
+
+    // Then set the row data
+    setTimeout(() => {
+      console.log("Setting grid data", data);
+      this.rowData = [...data];
+      if (this.gridApi) {
+        this.gridApi.setGridOption('columnDefs', this.colDefs);
+        this.gridApi.setGridOption('rowData', this.rowData);
+      }
+    });
+  }
+
+  onGridReady(params: GridReadyEvent) {
+    console.log("Grid Ready!", params);
+    this.gridApi = params.api;
+    this.gridApi.sizeColumnsToFit();
+    // if (this.isConnected()) {
+    //   this.selectedCollection.set('organizations');
+    //   this.loadCollectionData(this.selectedCollection());
+    // }
+    this.gitHubIntegrationStatus();
+  }
+
+  gitHubIntegrationStatus() {
+    this.githubService.getIntegrationStatus().subscribe({
+      next: (response) => {
+        console.log("status response",response);
+        this.isConnected.set(response.isConnected);
+        this.connectedAt.set(response.connectedAt || null);
+        this.username.set(response.username || null);
+        if (this.isConnected()) {
+          this.loadCollectionData(this.selectedCollection());
+        }
+      },
+      error: (error) => {
+        console.error('Error checking integration status:', error);
+      }
+    });
+  }
+
+  loadCollectionData(collection: string) {
+    this.githubService.getCollectionData(collection, this.searchText).pipe(
+      takeUntil(this.destroy$)).subscribe({
+      next: (response) => {
+        console.log("collection response",response);
+        this.totalPages = Math.ceil(response.data.length / this.paginationPageSize());
+        this.setGridData(response.data);
+      },
+      error: (error: any) => {
+        console.error('Error loading data:', error);
+      }
+    });
+  }
+
+  connectToGithub() {
+    this.githubService.startGithubAuth().subscribe({
+      next: (response:any) => {
+        window.location.href = response.authUrl;
+      },
+      error: (error:any) => {
+        console.error('Error connecting to GitHub:', error);
+      }
+    });
+  }
+
+  removeIntegration() { 
+    this.githubService.removeIntegration().subscribe({
+      next: () => {
+        this.isConnected.set(false);
+        this.connectedAt.set(null);
+        this.username.set(null);
+        this.rowData = [];
+        this.colDefs = [];
+        this.fetchStatus.set('idle');
+        this.fetchProgress.set(0);
+        this.fetchMessage.set('');
+      },
+      error: (error:any) => {
+        console.error('Error removing integration:', error);
+      }
+    });
+  }
+
+  onCollectionChange() {
+    this.currentPage = 1;
+    this.loadCollectionData(this.selectedCollection());
+  }
+
+  onSearch() {
+    this.searchSubject.next();
   }
 
   ngOnDestroy() {
@@ -68,7 +179,7 @@ export class GithubIntegration implements OnInit, OnDestroy {
       debounceTime(300)
     ).subscribe(() => {
       this.currentPage = 1;
-      this.loadCollectionData();
+      this.loadCollectionData(this.selectedCollection());
     });
   }
 
@@ -78,12 +189,12 @@ export class GithubIntegration implements OnInit, OnDestroy {
       takeUntil(this.destroy$),
       switchMap(() => this.githubService.getFetchStatus())
     ).subscribe({
-      next: (response) => {
-        this.fetchStatus = response.status;
-        this.fetchProgress = response.progress;
-        this.fetchMessage = response.message;
-        if (response.status === 'completed' && this.isConnected) {
-          this.loadCollectionData();
+      next: (response: any) => {
+        this.fetchStatus.set(response.status);
+        this.fetchProgress.set(response.progress);
+        this.fetchMessage.set(response.message);
+        if (response.status === 'completed' && this.isConnected()) {
+          this.loadCollectionData(this.selectedCollection());
         }
       },
       error: (error) => {
@@ -92,122 +203,20 @@ export class GithubIntegration implements OnInit, OnDestroy {
     });
   }
 
-  checkIntegrationStatus() {
-    this.githubService.getIntegrationStatus().subscribe({
-      next: (response) => {
-        console.log("status response",response);
-        this.isConnected = response.isConnected;
-        this.connectedAt = response.connectedAt ? new Date(response.connectedAt) : null;
-        this.username = response.username;
-        if (this.isConnected && this.fetchStatus === 'completed') {
-          // Set default collection and load data
-          this.selectedCollection = 'organizations';
-          this.loadCollectionData();
-        }
-      },
-      error: (error) => {
-        console.error('Error checking integration status:', error);
-      }
-    });
-  }
-
-  connectToGithub() {
-    this.githubService.startGithubAuth().subscribe({
-      next: (response) => {
-        window.location.href = response.authUrl;
-      }
-    });
-  }
-
-  removeIntegration() {
-    this.githubService.removeIntegration().subscribe({
-      next: () => {
-        this.isConnected = false;
-        this.connectedAt = null;
-        this.username = null;
-        this.rowData = [];
-        this.fetchStatus = 'pending';
-        this.fetchProgress = 0;
-        this.fetchMessage = '';
-      }
-    });
-  }
-
-  onCollectionChange() {
-    console.log("collection change",this.selectedCollection);
-    this.currentPage = 1;
-    this.loadCollectionData();
-  }
-
-  onSearch() {
-    this.searchSubject.next();
-  }
-
-  loadCollectionData() {
-    if (this.loading) return;
-    this.loading = true;
-
-    this.githubService.getCollectionData(this.selectedCollection, this.searchText).pipe(
-      takeUntil(this.destroy$)).subscribe({
-      next: (response) => {
-        console.log("collection response",response);        
-        this.rowData = response.data;
-        this.totalPages = Math.ceil(response.data.length / this.paginationPageSize);
-        
-        // Dynamically set column definitions
-        if (response.data.length > 0) {
-          this.columnDefs = [
-            {
-              headerName: '#',
-              valueFormatter: (params: ValueFormatterParams) => ((params.node?.rowIndex || 0) + 1).toString(),
-              width: 70,
-              pinned: 'left'
-            },
-            ...Object.keys(response.data[0]).map(key => ({
-              field: key,
-              filter: true,
-              sortable: true,
-              resizable: true
-            }))
-          ];
-        }
-      },
-      error: (error) => {
-        console.error('Error loading data:', error);
-      },
-      complete: () => {
-        this.loading = false;
-      }
-    });
-  }
-
-  rowSelection: RowSelectionOptions = {
-    mode: "multiRow",
-    headerCheckbox: false,
-  };
-
-  // Default Column Definitions: Apply configuration across all columns
-  defaultColDef: ColDef = {
-    filter: true, // Enable filtering on all columns
-    editable: true, // Enable editing on all columns
-  };
-
-  // Handle row selection changed event
   onSelectionChanged = (event: SelectionChangedEvent) => {
     console.log("Row Selected!");
   };
-
-  // Handle cell editing event
   onCellValueChanged = (event: CellValueChangedEvent) => {
     console.log(`New Cell Value: ${event.value}`);
   };
 
-  onPageChange(event: PaginationChangedEvent) {
+  onPageChange(event: PaginationChangedEvent<any>) {
     console.log("Page Changed!");
     const newPage = event.api.paginationGetCurrentPage() + 1;
     if (newPage !== this.currentPage) {
       this.currentPage = newPage;
-      this.loadCollectionData();
+      this.loadCollectionData(this.selectedCollection());
     }
   }
+
 }

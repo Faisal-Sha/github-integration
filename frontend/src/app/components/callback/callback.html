@@ -1,5 +1,7 @@
 <div style="padding: 20px;">
     <h3>{{ message }}</h3>
     <mat-progress-bar mode="determinate" [value]="progress"></mat-progress-bar>
-    <p *ngIf="status === 'failed'" style="color: red;">An error occurred during data fetching.</p>
+    @if (status() === 'failed') {
+      <p style="color: red;">An error occurred during data fetching.</p>
+    }
 </div>

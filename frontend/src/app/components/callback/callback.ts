@@ -1,6 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { GithubService } from '../../services/github.service';
+import { GithubService } from '../../services/github';
 import { interval, Subject } from 'rxjs';
 import { takeUntil, switchMap } from 'rxjs/operators';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
@@ -15,7 +15,7 @@ import { CommonModule } from '@angular/common';
 export class Callback {
   private destroy$ = new Subject<void>();
   progress = 0;
-  status = 'pending';
+  status = signal<'pending' | 'processing' | 'failed' | 'completed'>('pending');
   message = 'Processing GitHub authentication...';
 
   constructor(
@@ -32,7 +32,7 @@ export class Callback {
           // Start polling fetch status
           this.pollFetchStatus();
         },
-        error: (error) => {
+        error: (error:any) => {
           console.error('Error in GitHub callback:', error);
           this.router.navigate(['/'], { queryParams: { error: 'Authentication failed' } });
         }
@@ -53,7 +53,7 @@ export class Callback {
       switchMap(() => this.githubService.getFetchStatus())
     ).subscribe({
       next: (response) => {
-        this.status = response.status;
+        this.status.set(response.status as 'pending' | 'processing' | 'failed' | 'completed');
         this.progress = response.progress;
         this.message = response.message;
 
@@ -61,7 +61,7 @@ export class Callback {
           this.router.navigate(['/']);
         }
       },
-      error: (error) => {
+      error: (error:any) => {
         console.error('Error polling fetch status:', error);
         this.router.navigate(['/'], { queryParams: { error: 'Failed to fetch data' } });
       }
